@@ -12,6 +12,11 @@ public class TrayApplicationContext : ApplicationContext
     private AppConfig _config;
     private IpStatus _lastStatus = new();
 
+    // 菜单项引用, 用于运行时更新文本/勾选状态
+    private ToolStripMenuItem? _miLock;
+    private ToolStripMenuItem? _miUnlock;
+    private ToolStripMenuItem? _miRestore;
+
     public TrayApplicationContext()
     {
         _config = ConfigManager.Load();
@@ -29,6 +34,9 @@ public class TrayApplicationContext : ApplicationContext
         _floatingBar.SetExternalMenu(_contextMenu);
         _floatingBar.RefreshRequested += async (_, _) => await ManualRefresh();
         _floatingBar.Show();
+
+        // 菜单弹出前刷新各项状态(锁定/恢复)
+        _contextMenu.Opening += (_, _) => UpdateMenuStates();
 
         _engine = new IpMonitorEngine(_config);
         _engine.StatusUpdated += OnStatusUpdated;
@@ -74,8 +82,8 @@ public class TrayApplicationContext : ApplicationContext
         refresh.Click += async (_, _) => await ManualRefresh();
         _contextMenu.Items.Add(refresh);
 
-        var lockCurrent = new ToolStripMenuItem("锁定当前IP为预期");
-        lockCurrent.Click += (_, _) =>
+        _miLock = new ToolStripMenuItem("锁定当前IP为预期");
+        _miLock.Click += (_, _) =>
         {
             if (string.IsNullOrEmpty(_lastStatus.CurrentIp))
             {
@@ -89,16 +97,16 @@ public class TrayApplicationContext : ApplicationContext
             _trayIcon.ShowBalloonTip(2000, "已锁定IP",
                 $"预期IP设为: {_config.ExpectedIp}", ToolTipIcon.Info);
         };
-        _contextMenu.Items.Add(lockCurrent);
+        _contextMenu.Items.Add(_miLock);
 
-        var unlock = new ToolStripMenuItem("清除预期IP(停止监测)");
-        unlock.Click += (_, _) =>
+        _miUnlock = new ToolStripMenuItem("清除预期IP(停止监测)");
+        _miUnlock.Click += (_, _) =>
         {
             _config.ExpectedIp = "";
             ConfigManager.Save(_config);
             _engine.UpdateConfig(_config);
         };
-        _contextMenu.Items.Add(unlock);
+        _contextMenu.Items.Add(_miUnlock);
 
         _contextMenu.Items.Add(new ToolStripSeparator());
 
@@ -112,15 +120,15 @@ public class TrayApplicationContext : ApplicationContext
         };
         _contextMenu.Items.Add(switchNow);
 
-        var restore = new ToolStripMenuItem("恢复Clash代理 (切回原节点)");
-        restore.Click += async (_, _) =>
+        _miRestore = new ToolStripMenuItem("恢复Clash代理 (切回原模式和节点)");
+        _miRestore.Click += async (_, _) =>
         {
             var op = await ClashController.RestoreFromBackup(_config, CancellationToken.None);
             MessageBox.Show(op.Report, "恢复代理 完成",
                 MessageBoxButtons.OK,
                 op.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         };
-        _contextMenu.Items.Add(restore);
+        _contextMenu.Items.Add(_miRestore);
 
         _contextMenu.Items.Add(new ToolStripSeparator());
 
@@ -171,6 +179,38 @@ public class TrayApplicationContext : ApplicationContext
     private async Task ManualRefresh()
     {
         try { await _engine.TickNow(); } catch { }
+    }
+
+    /// <summary>
+    /// 菜单弹出前刷新动态状态: 已锁定时菜单显示锚定IP+对勾, 未锁定时清除项变灰
+    /// </summary>
+    private void UpdateMenuStates()
+    {
+        var hasExpected = !string.IsNullOrEmpty(_config.ExpectedIp);
+
+        if (_miLock != null)
+        {
+            if (hasExpected)
+            {
+                var drifted = !string.IsNullOrEmpty(_lastStatus.CurrentIp)
+                              && _lastStatus.CurrentIp != _config.ExpectedIp;
+                _miLock.Text = drifted
+                    ? $"⚠ 已锚定: {_config.ExpectedIp} (当前已漂移)"
+                    : $"已锚定: {_config.ExpectedIp}";
+                _miLock.Checked = true;
+            }
+            else
+            {
+                _miLock.Text = "锁定当前IP为预期";
+                _miLock.Checked = false;
+            }
+        }
+
+        if (_miUnlock != null)
+            _miUnlock.Enabled = hasExpected;
+
+        if (_miRestore != null)
+            _miRestore.Enabled = ClashController.HasBackup;
     }
 
     private async Task ManualRedetect()

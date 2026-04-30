@@ -5,17 +5,28 @@ using System.Text.Json;
 namespace IpMonitor.Monitor;
 
 /// <summary>
-/// Clash控制器 - 只通过REST API操作, 不杀进程不动注册表.
-/// 设计目标: 临时把流量切到DIRECT, 不影响本地网络, 用户重启Clash自动恢复, 也可手动一键恢复.
+/// Clash 控制器 - 通过 REST API 切换 Clash 模式 + selector, 不杀进程不动注册表.
+///
+/// 关键: 用户的 Clash 一般是 rule 模式, 仅切 selector 不影响 RULE 命中的连接.
+/// 所以"断开"必须 PATCH /configs 把整个 mode 切到 direct, 这是 Clash 三种模式之一,
+/// direct 模式下所有流量绕过规则全部直连. 这是最有效且最简单的"临时断开代理".
+/// 同时也切所有 selector 到 DIRECT 作为双保险.
+///
+/// "恢复" 把 mode 切回原值 + selector 切回原节点.
 /// </summary>
 public static class ClashController
 {
     private static readonly HttpClient Http = CreateHttp();
 
-    /// <summary>
-    /// 上一次断开时, 每个Selector原本选中的节点. 用于恢复.
-    /// </summary>
-    private static Dictionary<string, string> _backupSelections = new();
+    private class StateBackup
+    {
+        public string OriginalMode = "rule";
+        public bool ModeWasSwitched;
+        public Dictionary<string, string> OriginalSelections = new();
+    }
+
+    private static StateBackup? _backup;
+    public static bool HasBackup => _backup != null;
 
     private static HttpClient CreateHttp()
     {
@@ -26,122 +37,165 @@ public static class ClashController
     public class OperationResult
     {
         public bool Success;
-        public int Switched;     // 实际切换的Selector数
-        public int Total;        // 探测到的Selector总数
+        public int Switched;
+        public int Total;
         public string Report = "";
     }
 
     /// <summary>
-    /// 临时断开: 把所有Selector切到DIRECT. 备份原选择.
+    /// 临时断开代理: PATCH mode 到 direct + 切所有 selector 到 DIRECT. 备份原状态.
     /// </summary>
     public static async Task<OperationResult> SwitchAllToDirect(AppConfig cfg, CancellationToken ct)
     {
         var r = new OperationResult();
         var lines = new List<string>();
 
+        // 1) 拿当前 mode
+        var currentMode = await GetCurrentMode(cfg, ct);
+        if (currentMode == null)
+        {
+            r.Report = "✗ 无法连接 Clash API: " + cfg.ClashApiUrl + "\n   (检查端口/secret或 Clash 是否开着 external-controller)";
+            return r;
+        }
+
+        // 2) 拿所有 selector
         var selectors = await ListSelectors(cfg, ct);
         if (selectors == null)
         {
-            r.Report = "无法连接Clash API: " + cfg.ClashApiUrl;
+            r.Report = "✗ 无法获取 Clash 代理列表";
             return r;
         }
 
-        // 只对包含DIRECT选项的Selector生效
-        var targets = selectors.Where(s => s.AllOptions.Contains("DIRECT")).ToList();
-        r.Total = targets.Count;
-        if (targets.Count == 0)
+        // 3) 备份
+        _backup = new StateBackup { OriginalMode = currentMode };
+        foreach (var s in selectors)
         {
-            r.Report = "未发现含DIRECT选项的Selector";
-            return r;
+            if (s.Now != "DIRECT" && !string.IsNullOrEmpty(s.Now))
+                _backup.OriginalSelections[s.Name] = s.Now;
         }
 
-        // 备份原选择(不覆盖已经是DIRECT的)
-        _backupSelections.Clear();
-        foreach (var s in targets)
-        {
-            if (!string.IsNullOrEmpty(s.Now) && s.Now != "DIRECT")
-                _backupSelections[s.Name] = s.Now;
-        }
+        lines.Add($"原始状态: mode={currentMode}, selectors备份 {_backup.OriginalSelections.Count} 个");
+        lines.Add("");
 
-        foreach (var s in targets)
+        // 4) 关键步骤: 切 mode 到 direct (无视所有规则, 全部直连)
+        if (currentMode != "direct")
         {
-            if (s.Now == "DIRECT") { lines.Add($"  {s.Name}: 已是DIRECT, 跳过"); continue; }
-            if (await SwitchOne(cfg, s.Name, "DIRECT", ct))
+            if (await PatchMode(cfg, "direct", ct))
             {
+                _backup.ModeWasSwitched = true;
                 r.Switched++;
-                lines.Add($"  {s.Name}: {s.Now} → DIRECT");
+                r.Total++;
+                lines.Add($"✓ Clash 模式: {currentMode} → direct (全部规则失效, 流量走本机直连)");
             }
             else
             {
-                lines.Add($"  {s.Name}: 切换失败");
+                lines.Add($"✗ 切换 mode 到 direct 失败 (PATCH /configs)");
+                r.Total++;
+            }
+        }
+        else
+        {
+            lines.Add("- Clash 已经是 direct 模式, 无需切换 mode");
+        }
+
+        // 5) 双保险: 同时把所有 selector 切到 DIRECT
+        var targets = selectors.Where(s => s.AllOptions.Contains("DIRECT") && s.Now != "DIRECT").ToList();
+        r.Total += targets.Count;
+        foreach (var s in targets)
+        {
+            if (await SwitchOne(cfg, s.Name, "DIRECT", ct))
+            {
+                r.Switched++;
+                lines.Add($"  ✓ {s.Name}: {s.Now} → DIRECT");
+            }
+            else
+            {
+                lines.Add($"  ✗ {s.Name}: 切换失败");
             }
         }
 
         r.Success = r.Switched > 0;
-        r.Report = $"已把 {r.Switched}/{r.Total} 个Selector切到DIRECT, 流量直连本机.\n" +
-                   $"备份了 {_backupSelections.Count} 个原节点选择, 可一键恢复.\n\n" +
-                   string.Join("\n", lines);
+        r.Report = string.Join("\n", lines) +
+                   "\n\n现在浏览器访问 https://chatgpt.com/cdn-cgi/trace 应该看到本机直连IP" +
+                   "\n如需恢复代理: 右键 → 恢复Clash代理, 或重启Clash";
         return r;
     }
 
     /// <summary>
-    /// 一键恢复: 把每个Selector切回断开前的节点.
+    /// 一键恢复: PATCH mode 回原值 + 切 selector 回原节点
     /// </summary>
     public static async Task<OperationResult> RestoreFromBackup(AppConfig cfg, CancellationToken ct)
     {
         var r = new OperationResult();
-        if (_backupSelections.Count == 0)
+        if (_backup == null)
         {
-            r.Report = "无备份可恢复(可能是首次启动, 或Clash已自动恢复).\n如需恢复代理, 请在Clash里手动选回节点.";
+            r.Report = "无备份可恢复.\n如需恢复代理: 在 Clash 里手动选回原模式和节点, 或重启 Clash.";
             return r;
         }
 
         var lines = new List<string>();
-        r.Total = _backupSelections.Count;
-        foreach (var kv in _backupSelections.ToList())
+
+        // 1) 恢复 mode
+        if (_backup.ModeWasSwitched)
+        {
+            r.Total++;
+            if (await PatchMode(cfg, _backup.OriginalMode, ct))
+            {
+                r.Switched++;
+                lines.Add($"✓ Clash 模式: direct → {_backup.OriginalMode}");
+            }
+            else
+            {
+                lines.Add($"✗ 模式恢复失败 (目标: {_backup.OriginalMode})");
+            }
+        }
+
+        // 2) 恢复 selector
+        r.Total += _backup.OriginalSelections.Count;
+        foreach (var kv in _backup.OriginalSelections.ToList())
         {
             if (await SwitchOne(cfg, kv.Key, kv.Value, ct))
             {
                 r.Switched++;
-                lines.Add($"  {kv.Key} → {kv.Value}");
+                lines.Add($"  ✓ {kv.Key} → {kv.Value}");
             }
             else
             {
-                lines.Add($"  {kv.Key} → {kv.Value} (失败)");
+                lines.Add($"  ✗ {kv.Key} → {kv.Value} (失败)");
             }
         }
 
         r.Success = r.Switched > 0;
-        r.Report = $"已恢复 {r.Switched}/{r.Total} 个Selector的原节点选择.\n\n" + string.Join("\n", lines);
-        if (r.Success) _backupSelections.Clear();
+        r.Report = lines.Count > 0
+            ? string.Join("\n", lines)
+            : "无需恢复(原本就是当前状态)";
+        if (r.Success) _backup = null;
         return r;
     }
 
-    public static bool HasBackup => _backupSelections.Count > 0;
-
     /// <summary>
-    /// 测试Clash API连通性. 返回友好诊断信息.
+    /// 测试 Clash API 连通性. 返回友好诊断信息.
     /// </summary>
     public static async Task<string> TestConnection(AppConfig cfg, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(cfg.ClashApiUrl))
-            return "未配置Clash API URL";
+            return "未配置 Clash API URL";
         try
         {
             var url = cfg.ClashApiUrl.TrimEnd('/') + "/version";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrEmpty(cfg.ClashApiSecret))
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ClashApiSecret);
+            AddAuth(req, cfg);
             using var resp = await Http.SendAsync(req, ct);
             if (resp.IsSuccessStatusCode)
             {
-                var body = await resp.Content.ReadAsStringAsync(ct);
+                var version = (await resp.Content.ReadAsStringAsync(ct)).Trim();
+                var mode = await GetCurrentMode(cfg, ct) ?? "未知";
                 var selectors = await ListSelectors(cfg, ct);
                 var sCount = selectors?.Count(s => s.AllOptions.Contains("DIRECT")) ?? 0;
-                return $"✓ 连接成功\nURL: {cfg.ClashApiUrl}\n版本: {body.Trim()}\n可控Selector: {sCount} 个";
+                return $"✓ 连接成功\nURL: {cfg.ClashApiUrl}\n版本: {version}\n当前模式: {mode}\n可控Selector: {sCount} 个";
             }
             if ((int)resp.StatusCode == 401)
-                return $"✗ 401 未授权\nSecret不匹配, 请检查 ClashApiSecret 设置";
+                return $"✗ 401 未授权\nSecret 不匹配, 请检查 ClashApiSecret 设置";
             return $"✗ HTTP {(int)resp.StatusCode}";
         }
         catch (Exception ex)
@@ -159,14 +213,48 @@ public static class ClashController
         public List<string> AllOptions = new();
     }
 
+    private static async Task<string?> GetCurrentMode(AppConfig cfg, CancellationToken ct)
+    {
+        try
+        {
+            var url = cfg.ClashApiUrl.TrimEnd('/') + "/configs";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            AddAuth(req, cfg);
+            using var resp = await Http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("mode", out var modeEl))
+                return modeEl.GetString()?.ToLowerInvariant();
+        }
+        catch { }
+        return null;
+    }
+
+    private static async Task<bool> PatchMode(AppConfig cfg, string newMode, CancellationToken ct)
+    {
+        try
+        {
+            var url = cfg.ClashApiUrl.TrimEnd('/') + "/configs";
+            var body = JsonSerializer.Serialize(new { mode = newMode });
+            using var req = new HttpRequestMessage(new HttpMethod("PATCH"), url)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            AddAuth(req, cfg);
+            using var resp = await Http.SendAsync(req, ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch { return false; }
+    }
+
     private static async Task<List<SelectorInfo>?> ListSelectors(AppConfig cfg, CancellationToken ct)
     {
         try
         {
             var url = cfg.ClashApiUrl.TrimEnd('/') + "/proxies";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrEmpty(cfg.ClashApiSecret))
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ClashApiSecret);
+            AddAuth(req, cfg);
             using var resp = await Http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync(ct);
@@ -207,11 +295,16 @@ public static class ClashController
                     JsonSerializer.Serialize(new { name = targetNode }),
                     Encoding.UTF8, "application/json")
             };
-            if (!string.IsNullOrEmpty(cfg.ClashApiSecret))
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ClashApiSecret);
+            AddAuth(req, cfg);
             using var resp = await Http.SendAsync(req, ct);
             return resp.IsSuccessStatusCode;
         }
         catch { return false; }
+    }
+
+    private static void AddAuth(HttpRequestMessage req, AppConfig cfg)
+    {
+        if (!string.IsNullOrEmpty(cfg.ClashApiSecret))
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.ClashApiSecret);
     }
 }
