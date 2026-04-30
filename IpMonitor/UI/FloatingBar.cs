@@ -175,14 +175,15 @@ public class FloatingBar : Form
         var ip = string.IsNullOrEmpty(st.CurrentIp) ? "等待中..." : st.CurrentIp;
         _ipLabel.Text = ip;
 
-        // 区域行: 国家+省+市 +(ISP简称); 低置信场景仍显示地理, 后缀加分歧标记
+        // 区域行: 国家+省+市 +(ISP简称); 直探命中时加上 CF 节点代码(LAX等)
         string baseRegion = st.GeoSummary() + (string.IsNullOrEmpty(st.Isp) ? "" : "  " + ShortenIsp(st.Isp));
+        string coloPart = string.IsNullOrEmpty(st.Colo) ? "" : $"  [{st.Colo}]";
         string regionText = st.Kind switch
         {
             IpStatusKind.NoNetwork => "网络异常",
-            IpStatusKind.LowConfidence => baseRegion + $"  ⚡分流{st.ProviderHits}/{st.ProviderTotal}",
-            IpStatusKind.MatchedLowConf => baseRegion + "  ⚡分流",
-            _ => baseRegion
+            IpStatusKind.LowConfidence => baseRegion + coloPart + $"  ⚡分流{st.ProviderHits}/{st.ProviderTotal}",
+            IpStatusKind.MatchedLowConf => baseRegion + coloPart + "  ⚡分流",
+            _ => baseRegion + coloPart
         };
         _regionLabel.Text = regionText;
 

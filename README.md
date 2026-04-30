@@ -8,7 +8,9 @@
 
 ## 用途
 
-如果你长期通过 Clash / mihomo 等代理客户端走固定地区节点（例如长期使用洛杉矶节点），**节点出口 IP 一旦悄悄漂移到其他城市/国家**（节点维护、IP 池轮换、配置异常等），可能导致依赖 IP 稳定性的应用产生异常。本工具持续监控公网 IP 是否仍是你"锚定"的那一个，一旦漂移：
+针对 **ChatGPT / Claude 等境外 AI 账号**的 IP 风控场景：长期通过 Clash 走固定地区节点（如美国洛杉矶）登录账号，**节点出口 IP 一旦漂移**（节点维护、IP 池轮换、配置异常）会被平台判定异常 → 弹验证码 / 封号 / 禁用。
+
+本工具直接探测 **chatgpt.com / claude.ai** 的 cdn-cgi trace 接口，拿到的就是这两个平台看到你的真实出口 IP。锚定它，一旦漂移：
 
 1. 弹窗 + 提示音报警
 2. 自动调用 Clash REST API 把所有 Selector 切到 DIRECT —— 流量立即走本机直连，停止使用漂移后的代理出口
@@ -18,12 +20,22 @@
 
 ## 工作原理
 
-1. **每 30 秒**（可配，最小 10s）并发查询 4 个独立站点：
-   - `api.ipify.org`
-   - `icanhazip.com`
-   - `api.ip.sb`
-   - `api.myip.com`
-2. **多数票决**：≥2 个站点返回相同 IP → 认定为"真实公网 IP"。否则标记 *多源不一致*，避免单一服务故障误触发。
+1. **每 30 秒**（可配，最小 10s）并发查询 7 个站点，按权重分三级：
+
+   | 等级 | 站点 | 权重 | 用途 |
+   |---|---|---|---|
+   | **业务直探** | `chatgpt.com/cdn-cgi/trace` | 3 | ChatGPT 看到的真实出口 IP |
+   | **业务直探** | `claude.ai/cdn-cgi/trace` | 3 | Claude 看到的真实出口 IP |
+   | **CF 通用** | `www.cloudflare.com/cdn-cgi/trace` | 2 | Cloudflare 边缘节点（含 colo 节点代码 LAX/SJC 等） |
+   | **普通 IP** | `api.ipify.org` | 1 | 兜底 |
+   | **普通 IP** | `icanhazip.com` | 1 | 兜底 |
+   | **普通 IP** | `api.ip.sb/ip` | 1 | 兜底 |
+   | **普通 IP** | `api.myip.com` | 1 | 兜底 |
+
+2. **决策优先级**：
+   - **业务直探任一成功** → 用其 IP（这就是 GPT/Claude 看到的 IP，最权威）
+   - 否则 **加权投票**：累计加权 ≥ 3 即高置信
+   - 全分歧 → 取延迟最低的成功站点（低置信，仅展示不报警）
 3. **地理位置**：用 `ip-api.com` 中文返回反查 `国家+省市+ISP`。
 4. **比对锚定 IP**：
    - 相同 → 状态绿点 ✓
@@ -117,7 +129,7 @@ ip-anchor/
 - 不杀任何进程、不修改 Windows 注册表
 - 仅通过 Clash 官方 REST API 切换 Selector，**等同于你在 Clash GUI 里手动切 DIRECT**
 - 不需要管理员权限
-- 数据全部留在 exe 同目录（`config.json` / `logs/`），不写入系统目录
+- 配置和日志写在 `%APPDATA%\IpAnchor\`，exe 同目录纯净。卸载只需删 exe + 该目录。拷到新电脑各自识别本机 Clash
 - 重启 Clash 自动恢复原节点选择（Clash 自身的持久化行为）
 
 ## 协议

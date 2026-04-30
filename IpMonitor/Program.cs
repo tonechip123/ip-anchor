@@ -23,7 +23,8 @@ static class Program
     {
         try
         {
-            var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+            // 日志放 %APPDATA%\IpAnchor\logs\, exe 同目录保持纯净
+            var logDir = Path.Combine(ConfigManager.ConfigDir, "logs");
             Directory.CreateDirectory(logDir);
             var logFile = Path.Combine(logDir, $"crash_{DateTime.Now:yyyyMMdd}.log");
             var msg = $"[{DateTime.Now:HH:mm:ss}] {source}: {ex?.Message}\n{ex?.StackTrace}\n\n";

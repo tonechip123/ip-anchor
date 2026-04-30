@@ -24,6 +24,7 @@ public class IpStatus
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
     public string DetailText { get; set; } = "";
     public string ChoiceReason { get; set; } = "";
+    public string Colo { get; set; } = "";   // CF边缘节点代码, 来自直探
 
     public string GeoSummary()
     {

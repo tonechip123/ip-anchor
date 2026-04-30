@@ -150,7 +150,8 @@ public class TrayApplicationContext : ApplicationContext
             var reason = string.IsNullOrEmpty(_lastStatus.ChoiceReason) ? "" : "\n\n选IP依据: " + _lastStatus.ChoiceReason;
             var detail = "\n\n各源详情:\n" + _lastStatus.DetailText;
             var clash = $"\n\nClash API: {(_config.ClashApiUrl == "" ? "未识别" : _config.ClashApiUrl)}";
-            MessageBox.Show(head + reason + detail + clash, "IP锚定 详情",
+            var path = $"\n\n配置目录: {ConfigManager.ConfigDir}";
+            MessageBox.Show(head + reason + detail + clash + path, "IP锚定 详情",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
         _contextMenu.Items.Add(about);

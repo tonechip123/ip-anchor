@@ -70,6 +70,7 @@ public class IpMonitorEngine
         st.LatencyMs = resolved.AvgLatencyMs;
         st.DetailText = resolved.DetailText();
         st.ChoiceReason = resolved.ChoiceReason;
+        st.Colo = resolved.Colo;
 
         if (string.IsNullOrEmpty(resolved.Ip))
         {
