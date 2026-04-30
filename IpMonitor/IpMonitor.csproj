@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <ApplicationIcon>monitor.ico</ApplicationIcon>
+    <RootNamespace>IpMonitor</RootNamespace>
+    <AssemblyName>IpAnchor</AssemblyName>
+    <Product>IP锚定</Product>
+    <AssemblyTitle>IP锚定 - IP稳定性监控</AssemblyTitle>
+    <Description>多源验证公网IP, 检测漂移自动切DIRECT, 用于代理节点IP稳定性监控</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="monitor.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,27 @@
+# Build
+bin/
+obj/
+publish/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+*.swp
+
+# Runtime data (may contain user IPs / Clash secrets — never commit)
+config.json
+logs/
+*.log
+*.pdb
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Misc
+*.exe
+*.dll
+*.cache
