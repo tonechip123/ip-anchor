@@ -13,7 +13,7 @@ public class GeoInfo
 
 /// <summary>
 /// IP地理位置查询. 主用 ip-api.com (45次/分钟免费, 无key).
-/// 同样直连不走系统代理.
+/// 不强制关代理: 让查询和业务流量走相同路由(Clash或直连均可), 反映真实环境.
 /// </summary>
 public static class GeoLookup
 {
@@ -21,9 +21,8 @@ public static class GeoLookup
 
     private static HttpClient CreateClient()
     {
-        var handler = new HttpClientHandler { UseProxy = false, Proxy = null };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("IpMonitor/1.0");
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("IpAnchor/1.0");
         return client;
     }
 

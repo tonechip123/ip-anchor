@@ -21,10 +21,11 @@ public static class TrayIconRenderer
 
         var bg = kind switch
         {
-            IpStatusKind.Matched => Color.FromArgb(0, 120, 0),
-            IpStatusKind.Inconsistent => Color.FromArgb(180, 130, 0),
-            IpStatusKind.Changed => Color.FromArgb(200, 0, 0),
-            IpStatusKind.NoNetwork => Color.FromArgb(80, 80, 80),
+            IpStatusKind.Matched         => Color.FromArgb(0, 120, 0),
+            IpStatusKind.MatchedLowConf  => Color.FromArgb(0, 100, 60),
+            IpStatusKind.LowConfidence   => Color.FromArgb(200, 120, 0),
+            IpStatusKind.Changed         => Color.FromArgb(200, 0, 0),
+            IpStatusKind.NoNetwork       => Color.FromArgb(80, 80, 80),
             _ => Color.FromArgb(40, 40, 40)
         };
         g.Clear(bg);
@@ -57,10 +58,11 @@ public static class TrayIconRenderer
     {
         var status = st.Kind switch
         {
-            IpStatusKind.Matched => "✓ IP一致",
-            IpStatusKind.Inconsistent => "⚠ 多源不一致",
-            IpStatusKind.Changed => "✗ IP已变化",
-            IpStatusKind.NoNetwork => "✗ 网络异常",
+            IpStatusKind.Matched         => "✓ IP一致",
+            IpStatusKind.MatchedLowConf  => "✓ IP一致 (分流环境低置信)",
+            IpStatusKind.LowConfidence   => "⚡ 多源分歧 (Clash分流, 已选最近站点)",
+            IpStatusKind.Changed         => "✗ IP已变化",
+            IpStatusKind.NoNetwork       => "✗ 网络异常",
             _ => "初始化中"
         };
         var ip = string.IsNullOrEmpty(st.CurrentIp) ? "--" : st.CurrentIp;

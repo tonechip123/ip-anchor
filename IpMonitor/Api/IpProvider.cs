@@ -32,15 +32,15 @@ public static class IpProvider
 
     private static HttpClient CreateHttpClient()
     {
-        // 关键: 绕过系统代理(Clash)直连查询, 避免代理切换中查到的是代理IP的中转节点
+        // 注意: 不强制关代理. 设计意图是让IP查询和业务流量走同一路径(都经过Clash路由),
+        // 这样查到的IP就是当前业务实际看到的出口IP.
+        // 在TUN模式下UseProxy=false也无效(TUN是IP层劫持, 应用无法绕过), 强关反而误导.
         var handler = new HttpClientHandler
         {
-            UseProxy = false,
-            Proxy = null,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         };
         var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("IpMonitor/1.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("IpAnchor/1.0");
         return client;
     }
 

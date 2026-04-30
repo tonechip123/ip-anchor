@@ -175,12 +175,14 @@ public class FloatingBar : Form
         var ip = string.IsNullOrEmpty(st.CurrentIp) ? "等待中..." : st.CurrentIp;
         _ipLabel.Text = ip;
 
-        // 区域行: 国家+省+市 +(ISP简称)
+        // 区域行: 国家+省+市 +(ISP简称); 低置信场景仍显示地理, 后缀加分歧标记
+        string baseRegion = st.GeoSummary() + (string.IsNullOrEmpty(st.Isp) ? "" : "  " + ShortenIsp(st.Isp));
         string regionText = st.Kind switch
         {
             IpStatusKind.NoNetwork => "网络异常",
-            IpStatusKind.Inconsistent => $"多源不一致 ({st.ProviderHits}/{st.ProviderTotal})",
-            _ => st.GeoSummary() + (string.IsNullOrEmpty(st.Isp) ? "" : "  " + ShortenIsp(st.Isp))
+            IpStatusKind.LowConfidence => baseRegion + $"  ⚡分流{st.ProviderHits}/{st.ProviderTotal}",
+            IpStatusKind.MatchedLowConf => baseRegion + "  ⚡分流",
+            _ => baseRegion
         };
         _regionLabel.Text = regionText;
 
@@ -189,10 +191,11 @@ public class FloatingBar : Form
         // 状态点颜色
         _statusDot.BackColor = st.Kind switch
         {
-            IpStatusKind.Matched => Color.FromArgb(50, 200, 50),
-            IpStatusKind.Inconsistent => Color.FromArgb(220, 180, 30),
-            IpStatusKind.Changed => Color.FromArgb(220, 50, 50),
-            IpStatusKind.NoNetwork => Color.FromArgb(120, 120, 120),
+            IpStatusKind.Matched         => Color.FromArgb(50, 200, 50),    // 绿: 匹配且高置信
+            IpStatusKind.MatchedLowConf  => Color.FromArgb(120, 200, 120),  // 浅绿: 匹配但低置信
+            IpStatusKind.LowConfidence   => Color.FromArgb(255, 165, 0),    // 橙: 多源分歧
+            IpStatusKind.Changed         => Color.FromArgb(220, 50, 50),    // 红: 已漂移
+            IpStatusKind.NoNetwork       => Color.FromArgb(120, 120, 120),  // 灰: 无网
             _ => Color.Gray
         };
 

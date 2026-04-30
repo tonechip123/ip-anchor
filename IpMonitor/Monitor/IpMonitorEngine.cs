@@ -69,22 +69,18 @@ public class IpMonitorEngine
         st.ProviderTotal = resolved.TotalProviders;
         st.LatencyMs = resolved.AvgLatencyMs;
         st.DetailText = resolved.DetailText();
+        st.ChoiceReason = resolved.ChoiceReason;
 
-        if (resolved.All.All(r => !r.Success))
+        if (string.IsNullOrEmpty(resolved.Ip))
         {
             st.Kind = IpStatusKind.NoNetwork;
             st.CurrentIp = "";
         }
-        else if (!resolved.IsTrusted)
-        {
-            // 没有2个一致 -> 不可信
-            st.Kind = IpStatusKind.Inconsistent;
-            st.CurrentIp = resolved.Ip; // 最高票, 仅作展示
-        }
         else
         {
+            // 永远给出IP(高置信=多数票, 低置信=最快站点fallback)
             st.CurrentIp = resolved.Ip;
-            // 地理位置
+
             try
             {
                 var geo = await GeoLookup.Lookup(resolved.Ip, ct);
@@ -98,25 +94,36 @@ public class IpMonitorEngine
             }
             catch { }
 
-            // 比对预期IP
             var expected = Config.ExpectedIp?.Trim() ?? "";
             if (string.IsNullOrEmpty(expected))
             {
-                st.Kind = IpStatusKind.Matched; // 未设预期, 视为正常
+                // 未设预期: 高置信=Matched, 低置信=LowConfidence(仅展示, 不报警)
+                st.Kind = resolved.IsHighConfidence ? IpStatusKind.Matched : IpStatusKind.LowConfidence;
             }
             else if (resolved.Ip == expected)
             {
-                st.Kind = IpStatusKind.Matched;
-                _hasSwitched = false; // 恢复匹配, 重置触发标记
+                // IP 与预期一致
+                st.Kind = resolved.IsHighConfidence ? IpStatusKind.Matched : IpStatusKind.MatchedLowConf;
+                _hasSwitched = false;
             }
             else
             {
-                st.Kind = IpStatusKind.Changed;
-                if (Config.AutoSwitchToDirect && !_hasSwitched)
+                // IP 与预期不同
+                if (resolved.IsHighConfidence)
                 {
-                    _hasSwitched = true;
-                    var op = await ClashController.SwitchAllToDirect(Config, ct);
-                    ClashSwitchedToDirect?.Invoke(this, op.Report);
+                    // 高置信下才触发自动断开, 避免分流环境误判
+                    st.Kind = IpStatusKind.Changed;
+                    if (Config.AutoSwitchToDirect && !_hasSwitched)
+                    {
+                        _hasSwitched = true;
+                        var op = await ClashController.SwitchAllToDirect(Config, ct);
+                        ClashSwitchedToDirect?.Invoke(this, op.Report);
+                    }
+                }
+                else
+                {
+                    // 低置信不一致 -> 仅显示警告色, 不触发动作
+                    st.Kind = IpStatusKind.LowConfidence;
                 }
             }
         }
