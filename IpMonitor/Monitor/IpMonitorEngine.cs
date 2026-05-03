@@ -12,17 +12,17 @@ public class IpMonitorEngine
     public IpStatus Status { get; private set; } = new();
 
     public event EventHandler<IpStatus>? StatusUpdated;
-    public event EventHandler<string>? ClashSwitchedToDirect; // string=报告
+    public event EventHandler<string>? IpChanged; // IP漂移报警
 
     private readonly CancellationTokenSource _cts = new();
-    private bool _hasSwitched; // 已切DIRECT后不重复触发, 直到IP恢复或用户手动重设预期IP
+    private bool _hasAlerted; // 已报警后不重复触发, 直到IP恢复或用户手动重设预期IP
 
     public IpMonitorEngine(AppConfig cfg) { Config = cfg; }
 
     public void UpdateConfig(AppConfig cfg)
     {
         Config = cfg;
-        _hasSwitched = false;
+        _hasAlerted = false;
     }
 
     public void Start()
@@ -53,7 +53,7 @@ public class IpMonitorEngine
 
             try
             {
-                var sec = Math.Max(10, Config.RefreshIntervalSec);
+                var sec = Math.Max(1, Config.RefreshIntervalSec);
                 await Task.Delay(TimeSpan.FromSeconds(sec), ct);
             }
             catch { break; }
@@ -105,20 +105,20 @@ public class IpMonitorEngine
             {
                 // IP 与预期一致
                 st.Kind = resolved.IsHighConfidence ? IpStatusKind.Matched : IpStatusKind.MatchedLowConf;
-                _hasSwitched = false;
+                _hasAlerted = false;
             }
             else
             {
                 // IP 与预期不同
                 if (resolved.IsHighConfidence)
                 {
-                    // 高置信下才触发自动断开, 避免分流环境误判
+                    // 高置信下才触发报警, 避免分流环境误判
                     st.Kind = IpStatusKind.Changed;
-                    if (Config.AutoSwitchToDirect && !_hasSwitched)
+                    if (!_hasAlerted)
                     {
-                        _hasSwitched = true;
-                        var op = await ClashController.SwitchAllToDirect(Config, ct);
-                        ClashSwitchedToDirect?.Invoke(this, op.Report);
+                        _hasAlerted = true;
+                        var report = $"IP已漂移!\n当前IP: {resolved.Ip}\n预期IP: {expected}\n区域: {st.Country} {st.Region} {st.City}\nISP: {st.Isp}";
+                        IpChanged?.Invoke(this, report);
                     }
                 }
                 else

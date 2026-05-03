@@ -5,11 +5,7 @@ namespace IpMonitor;
 public class AppConfig
 {
     public string ExpectedIp { get; set; } = "";
-    public int RefreshIntervalSec { get; set; } = 30;
-    public bool AutoSwitchToDirect { get; set; } = true;   // IP变化时自动切DIRECT
-    public string ClashApiUrl { get; set; } = "";          // 自动检测填入
-    public string ClashApiSecret { get; set; } = "";       // 自动检测填入
-    public string ClashApiSource { get; set; } = "";       // 来源描述(诊断用)
+    public int RefreshIntervalSec { get; set; } = 1;  // 默认1秒实时监控
 }
 
 public static class ConfigManager

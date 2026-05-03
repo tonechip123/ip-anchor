@@ -15,6 +15,8 @@ public class FloatingBar : Form
     private bool _didDrag;
     private ContextMenuStrip? _lastMenu;
     private ContextMenuStrip? _externalMenu;
+    private System.Windows.Forms.Timer? _blinkTimer;
+    private bool _blinkState;
 
     public event EventHandler? RefreshRequested;
 
@@ -189,16 +191,24 @@ public class FloatingBar : Form
 
         _latencyLabel.Text = st.LatencyMs > 0 ? $"{st.LatencyMs}ms" : "--ms";
 
-        // 状态点颜色
-        _statusDot.BackColor = st.Kind switch
+        // IP漂移时启动闪烁, 否则停止闪烁
+        if (st.Kind == IpStatusKind.Changed)
         {
-            IpStatusKind.Matched         => Color.FromArgb(50, 200, 50),    // 绿: 匹配且高置信
-            IpStatusKind.MatchedLowConf  => Color.FromArgb(120, 200, 120),  // 浅绿: 匹配但低置信
-            IpStatusKind.LowConfidence   => Color.FromArgb(255, 165, 0),    // 橙: 多源分歧
-            IpStatusKind.Changed         => Color.FromArgb(220, 50, 50),    // 红: 已漂移
-            IpStatusKind.NoNetwork       => Color.FromArgb(120, 120, 120),  // 灰: 无网
-            _ => Color.Gray
-        };
+            StartBlinking();
+        }
+        else
+        {
+            StopBlinking();
+            // 状态点颜色
+            _statusDot.BackColor = st.Kind switch
+            {
+                IpStatusKind.Matched         => Color.FromArgb(50, 200, 50),    // 绿: 匹配且高置信
+                IpStatusKind.MatchedLowConf  => Color.FromArgb(120, 200, 120),  // 浅绿: 匹配但低置信
+                IpStatusKind.LowConfidence   => Color.FromArgb(255, 165, 0),    // 橙: 多源分歧
+                IpStatusKind.NoNetwork       => Color.FromArgb(120, 120, 120),  // 灰: 无网
+                _ => Color.Gray
+            };
+        }
 
         _ipLabel.ForeColor = st.Kind == IpStatusKind.Changed ? Color.FromArgb(180, 0, 0) : Color.Black;
 
@@ -211,6 +221,31 @@ public class FloatingBar : Form
         _latencyLabel.Location = new Point(contentRight + 12, 12);
         var totalWidth = _latencyLabel.Right + 8;
         Width = Math.Max(MinimumSize.Width, totalWidth);
+    }
+
+    private void StartBlinking()
+    {
+        if (_blinkTimer == null)
+        {
+            _blinkTimer = new System.Windows.Forms.Timer { Interval = 500 }; // 500ms闪烁一次
+            _blinkTimer.Tick += (_, _) =>
+            {
+                _blinkState = !_blinkState;
+                _statusDot.BackColor = _blinkState
+                    ? Color.FromArgb(220, 50, 50)   // 红色
+                    : Color.FromArgb(255, 200, 200); // 浅红色
+            };
+        }
+        _blinkTimer.Start();
+    }
+
+    private void StopBlinking()
+    {
+        if (_blinkTimer != null)
+        {
+            _blinkTimer.Stop();
+            _blinkState = false;
+        }
     }
 
     private static string ShortenIsp(string isp)

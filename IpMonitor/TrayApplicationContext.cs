@@ -15,11 +15,14 @@ public class TrayApplicationContext : ApplicationContext
     // 菜单项引用, 用于运行时更新文本/勾选状态
     private ToolStripMenuItem? _miLock;
     private ToolStripMenuItem? _miUnlock;
-    private ToolStripMenuItem? _miRestore;
 
     public TrayApplicationContext()
     {
         _config = ConfigManager.Load();
+
+        // 调试：启动时显示加载的配置
+        MessageBox.Show($"加载配置:\nExpectedIp = '{_config.ExpectedIp}'\nRefreshIntervalSec = {_config.RefreshIntervalSec}",
+            "配置加载", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
         _contextMenu = new ContextMenuStrip();
         _floatingBar = new FloatingBar();
@@ -40,38 +43,10 @@ public class TrayApplicationContext : ApplicationContext
 
         _engine = new IpMonitorEngine(_config);
         _engine.StatusUpdated += OnStatusUpdated;
-        _engine.ClashSwitchedToDirect += OnClashSwitched;
+        _engine.IpChanged += OnIpChanged;
 
         BuildMenu();
         _engine.Start();
-
-        // 启动时自动检测Clash API(如果尚未配置)
-        if (string.IsNullOrEmpty(_config.ClashApiUrl))
-            _ = Task.Run(() => AutoDetectClashOnStartup());
-    }
-
-    private async Task AutoDetectClashOnStartup()
-    {
-        try
-        {
-            var info = await ClashAutoDetect.DetectAsync(CancellationToken.None);
-            if (info.Reachable)
-            {
-                _config.ClashApiUrl = info.ApiUrl;
-                _config.ClashApiSecret = info.Secret;
-                _config.ClashApiSource = info.Source;
-                ConfigManager.Save(_config);
-                _engine.UpdateConfig(_config);
-
-                _floatingBar.BeginInvoke(() =>
-                {
-                    _trayIcon.ShowBalloonTip(3000, "已自动识别Clash",
-                        $"API: {info.ApiUrl}\n来源: {Path.GetFileName(info.Source)}",
-                        ToolTipIcon.Info);
-                });
-            }
-        }
-        catch { }
     }
 
     private void BuildMenu()
@@ -87,7 +62,7 @@ public class TrayApplicationContext : ApplicationContext
         {
             if (string.IsNullOrEmpty(_lastStatus.CurrentIp))
             {
-                MessageBox.Show("当前未检测到可信IP, 无法锁定", "IP锚定",
+                MessageBox.Show("当前未检测到可信IP, 无法锁定", "IP监控",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -110,43 +85,6 @@ public class TrayApplicationContext : ApplicationContext
 
         _contextMenu.Items.Add(new ToolStripSeparator());
 
-        var switchNow = new ToolStripMenuItem("手动切到DIRECT (临时断开代理)");
-        switchNow.Click += async (_, _) =>
-        {
-            var op = await ClashController.SwitchAllToDirect(_config, CancellationToken.None);
-            MessageBox.Show(op.Report, "切到DIRECT 完成",
-                MessageBoxButtons.OK,
-                op.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-        };
-        _contextMenu.Items.Add(switchNow);
-
-        _miRestore = new ToolStripMenuItem("恢复Clash代理 (切回原模式和节点)");
-        _miRestore.Click += async (_, _) =>
-        {
-            var op = await ClashController.RestoreFromBackup(_config, CancellationToken.None);
-            MessageBox.Show(op.Report, "恢复代理 完成",
-                MessageBoxButtons.OK,
-                op.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-        };
-        _contextMenu.Items.Add(_miRestore);
-
-        _contextMenu.Items.Add(new ToolStripSeparator());
-
-        var redetect = new ToolStripMenuItem("重新检测Clash API");
-        redetect.Click += async (_, _) => await ManualRedetect();
-        _contextMenu.Items.Add(redetect);
-
-        var testApi = new ToolStripMenuItem("测试Clash API连通性");
-        testApi.Click += async (_, _) =>
-        {
-            var msg = await ClashController.TestConnection(_config, CancellationToken.None);
-            MessageBox.Show(msg, "Clash API 连通性",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-        };
-        _contextMenu.Items.Add(testApi);
-
-        _contextMenu.Items.Add(new ToolStripSeparator());
-
         var settings = new ToolStripMenuItem("设置...");
         settings.Click += OnSettingsClick;
         _contextMenu.Items.Add(settings);
@@ -157,9 +95,8 @@ public class TrayApplicationContext : ApplicationContext
             var head = TrayIconRenderer.BuildTooltip(_lastStatus);
             var reason = string.IsNullOrEmpty(_lastStatus.ChoiceReason) ? "" : "\n\n选IP依据: " + _lastStatus.ChoiceReason;
             var detail = "\n\n各源详情:\n" + _lastStatus.DetailText;
-            var clash = $"\n\nClash API: {(_config.ClashApiUrl == "" ? "未识别" : _config.ClashApiUrl)}";
             var path = $"\n\n配置目录: {ConfigManager.ConfigDir}";
-            MessageBox.Show(head + reason + detail + clash + path, "IP锚定 详情",
+            MessageBox.Show(head + reason + detail + path, "IP监控 详情",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
         _contextMenu.Items.Add(about);
@@ -208,39 +145,6 @@ public class TrayApplicationContext : ApplicationContext
 
         if (_miUnlock != null)
             _miUnlock.Enabled = hasExpected;
-
-        if (_miRestore != null)
-            _miRestore.Enabled = ClashController.HasBackup;
-    }
-
-    private async Task ManualRedetect()
-    {
-        try
-        {
-            var info = await ClashAutoDetect.DetectAsync(CancellationToken.None);
-            if (info.Reachable)
-            {
-                _config.ClashApiUrl = info.ApiUrl;
-                _config.ClashApiSecret = info.Secret;
-                _config.ClashApiSource = info.Source;
-                ConfigManager.Save(_config);
-                _engine.UpdateConfig(_config);
-                MessageBox.Show(
-                    $"✓ 自动检测成功\nURL: {info.ApiUrl}\nSecret: {(string.IsNullOrEmpty(info.Secret) ? "(无)" : "已识别")}\n来源: {info.Source}",
-                    "Clash API 已识别", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            else
-            {
-                MessageBox.Show(
-                    $"✗ 自动检测失败\n{info.Error}\n\n请在'设置'里手动填入URL和Secret.\nClash for Windows的端口和密钥在 设置→API核心端口 显示, 或在 data/config.yaml 里查看.",
-                    "Clash API 检测失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("检测异常: " + ex.Message, "错误",
-                MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
     }
 
     private void OnStatusUpdated(object? sender, IpStatus st)
@@ -260,17 +164,17 @@ public class TrayApplicationContext : ApplicationContext
         catch { }
     }
 
-    private void OnClashSwitched(object? sender, string report)
+    private void OnIpChanged(object? sender, string report)
     {
         try
         {
             _floatingBar.BeginInvoke(() =>
             {
                 _trayIcon.ShowBalloonTip(10000,
-                    "⚠ IP已变化, 已切到DIRECT",
-                    $"当前IP: {_lastStatus.CurrentIp}\n预期: {_config.ExpectedIp}\n区域: {_lastStatus.GeoSummary()}\n\n{report}\n\n如需恢复代理: 右键→恢复Clash代理, 或重启Clash",
+                    "⚠ IP已漂移",
+                    report,
                     ToolTipIcon.Warning);
-                System.Media.SystemSounds.Exclamation.Play();
+                // 移除提示音
             });
         }
         catch { }
@@ -279,17 +183,6 @@ public class TrayApplicationContext : ApplicationContext
     private async void OnSettingsClick(object? sender, EventArgs e)
     {
         using var form = new SettingsForm(_config) { CurrentDetectedIp = _lastStatus.CurrentIp };
-        form.RedetectRequested += async (_, _) =>
-        {
-            var info = await ClashAutoDetect.DetectAsync(CancellationToken.None);
-            form.ApplyDetectedClash(info.ApiUrl, info.Secret,
-                info.Reachable ? info.Source : (info.Error ?? "检测失败"));
-        };
-        form.TestApiRequested += async (_, _) =>
-        {
-            var msg = await ClashController.TestConnection(form.Config, CancellationToken.None);
-            MessageBox.Show(msg, "Clash API 连通性", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        };
 
         if (form.ShowDialog() == DialogResult.OK)
         {
