@@ -6,17 +6,17 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.3</Version>
-    <ApplicationIcon>monitor.ico</ApplicationIcon>
+    <Version>1.0.4</Version>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <RootNamespace>IpMonitor</RootNamespace>
     <AssemblyName>IpMonitor</AssemblyName>
-    <Product>IP锚定</Product>
-    <AssemblyTitle>IP锚定 - IP稳定性监控</AssemblyTitle>
-    <Description>多源验证公网IP, 检测漂移自动切DIRECT, 用于代理节点IP稳定性监控</Description>
+    <Product>IP监控</Product>
+    <AssemblyTitle>IP监控 - IP稳定性监控</AssemblyTitle>
+    <Description>多源验证公网IP, 实时检测IP漂移并报警</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="monitor.ico">
+    <None Update="app.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

@@ -65,6 +65,7 @@ public class TrayApplicationContext : ApplicationContext
             _config.ExpectedIp = _lastStatus.CurrentIp;
             ConfigManager.Save(_config);
             _engine.UpdateConfig(_config);
+            UpdateMenuStates(); // 立即更新菜单状态
             _trayIcon.ShowBalloonTip(2000, "已锁定IP",
                 $"预期IP设为: {_config.ExpectedIp}", ToolTipIcon.Info);
         };
@@ -76,6 +77,7 @@ public class TrayApplicationContext : ApplicationContext
             _config.ExpectedIp = "";
             ConfigManager.Save(_config);
             _engine.UpdateConfig(_config);
+            UpdateMenuStates(); // 立即更新菜单状态
         };
         _contextMenu.Items.Add(_miUnlock);
 
