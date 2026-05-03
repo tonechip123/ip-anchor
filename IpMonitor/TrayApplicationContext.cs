@@ -130,14 +130,12 @@ public class TrayApplicationContext : ApplicationContext
                 var drifted = !string.IsNullOrEmpty(_lastStatus.CurrentIp)
                               && _lastStatus.CurrentIp != _config.ExpectedIp;
                 _miLock.Text = drifted
-                    ? $"⚠ 正在监控 {_config.ExpectedIp} (当前已漂移)"
-                    : $"正在监控 {_config.ExpectedIp}";
-                _miLock.Checked = true;
+                    ? $"✓ ⚠ 正在监控 {_config.ExpectedIp} (当前已漂移)"
+                    : $"✓ 正在监控 {_config.ExpectedIp}";
             }
             else
             {
-                _miLock.Text = "未开始监控";
-                _miLock.Checked = false;
+                _miLock.Text = "  未开始监控";
             }
         }
     }
