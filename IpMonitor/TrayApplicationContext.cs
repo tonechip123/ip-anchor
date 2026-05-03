@@ -14,7 +14,6 @@ public class TrayApplicationContext : ApplicationContext
 
     // 菜单项引用, 用于运行时更新文本/勾选状态
     private ToolStripMenuItem? _miLock;
-    private ToolStripMenuItem? _miUnlock;
 
     public TrayApplicationContext()
     {
@@ -53,39 +52,40 @@ public class TrayApplicationContext : ApplicationContext
         refresh.Click += async (_, _) => await ManualRefresh();
         _contextMenu.Items.Add(refresh);
 
-        _miLock = new ToolStripMenuItem("锁定当前IP为预期");
+        _miLock = new ToolStripMenuItem("未开始监控");
         _miLock.Click += (_, _) =>
         {
-            if (string.IsNullOrEmpty(_lastStatus.CurrentIp))
+            var hasExpected = !string.IsNullOrEmpty(_config.ExpectedIp);
+
+            if (hasExpected)
             {
-                MessageBox.Show("当前未检测到可信IP, 无法锁定", "IP监控",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                // 当前正在监控，点击取消监控
+                _config.ExpectedIp = "";
+                ConfigManager.Save(_config);
+                _engine.UpdateConfig(_config);
+                UpdateMenuStates();
+                _trayIcon.ShowBalloonTip(2000, "已停止监控", "不再监控IP变化", ToolTipIcon.Info);
             }
-            _config.ExpectedIp = _lastStatus.CurrentIp;
-            ConfigManager.Save(_config);
-            _engine.UpdateConfig(_config);
-            UpdateMenuStates(); // 立即更新菜单状态
-            _trayIcon.ShowBalloonTip(2000, "已锁定IP",
-                $"预期IP设为: {_config.ExpectedIp}", ToolTipIcon.Info);
+            else
+            {
+                // 当前未监控，点击开始监控
+                if (string.IsNullOrEmpty(_lastStatus.CurrentIp))
+                {
+                    MessageBox.Show("当前未检测到可信IP, 无法开始监控", "IP监控",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                _config.ExpectedIp = _lastStatus.CurrentIp;
+                ConfigManager.Save(_config);
+                _engine.UpdateConfig(_config);
+                UpdateMenuStates();
+                _trayIcon.ShowBalloonTip(2000, "已开始监控",
+                    $"正在监控IP: {_config.ExpectedIp}", ToolTipIcon.Info);
+            }
         };
         _contextMenu.Items.Add(_miLock);
 
-        _miUnlock = new ToolStripMenuItem("清除预期IP(停止监测)");
-        _miUnlock.Click += (_, _) =>
-        {
-            _config.ExpectedIp = "";
-            ConfigManager.Save(_config);
-            _engine.UpdateConfig(_config);
-            UpdateMenuStates(); // 立即更新菜单状态
-        };
-        _contextMenu.Items.Add(_miUnlock);
-
         _contextMenu.Items.Add(new ToolStripSeparator());
-
-        var settings = new ToolStripMenuItem("设置...");
-        settings.Click += OnSettingsClick;
-        _contextMenu.Items.Add(settings);
 
         var about = new ToolStripMenuItem("查看详情");
         about.Click += (_, _) =>
@@ -117,7 +117,7 @@ public class TrayApplicationContext : ApplicationContext
     }
 
     /// <summary>
-    /// 菜单弹出前刷新动态状态: 已锁定时菜单显示锚定IP+对勾, 未锁定时清除项变灰
+    /// 菜单弹出前刷新动态状态: 正在监控时显示勾选+IP, 未监控时显示"未开始监控"
     /// </summary>
     private void UpdateMenuStates()
     {
@@ -130,19 +130,16 @@ public class TrayApplicationContext : ApplicationContext
                 var drifted = !string.IsNullOrEmpty(_lastStatus.CurrentIp)
                               && _lastStatus.CurrentIp != _config.ExpectedIp;
                 _miLock.Text = drifted
-                    ? $"⚠ 已锚定: {_config.ExpectedIp} (当前已漂移)"
-                    : $"已锚定: {_config.ExpectedIp}";
+                    ? $"⚠ 正在监控 {_config.ExpectedIp} (当前已漂移)"
+                    : $"正在监控 {_config.ExpectedIp}";
                 _miLock.Checked = true;
             }
             else
             {
-                _miLock.Text = "锁定当前IP为预期";
+                _miLock.Text = "未开始监控";
                 _miLock.Checked = false;
             }
         }
-
-        if (_miUnlock != null)
-            _miUnlock.Enabled = hasExpected;
     }
 
     private void OnStatusUpdated(object? sender, IpStatus st)
@@ -176,19 +173,6 @@ public class TrayApplicationContext : ApplicationContext
             });
         }
         catch { }
-    }
-
-    private async void OnSettingsClick(object? sender, EventArgs e)
-    {
-        using var form = new SettingsForm(_config) { CurrentDetectedIp = _lastStatus.CurrentIp };
-
-        if (form.ShowDialog() == DialogResult.OK)
-        {
-            _config = form.Config;
-            ConfigManager.Save(_config);
-            _engine.UpdateConfig(_config);
-        }
-        await Task.CompletedTask;
     }
 
     protected override void Dispose(bool disposing)
