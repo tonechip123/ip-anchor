@@ -20,10 +20,6 @@ public class TrayApplicationContext : ApplicationContext
     {
         _config = ConfigManager.Load();
 
-        // 调试：启动时显示加载的配置
-        MessageBox.Show($"加载配置:\nExpectedIp = '{_config.ExpectedIp}'\nRefreshIntervalSec = {_config.RefreshIntervalSec}",
-            "配置加载", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
         _contextMenu = new ContextMenuStrip();
         _floatingBar = new FloatingBar();
         _trayIcon = new NotifyIcon
